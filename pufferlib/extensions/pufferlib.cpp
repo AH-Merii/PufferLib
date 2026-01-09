@@ -1109,10 +1109,17 @@ pybind11::dict log_environments(pybind11::object pufferl_obj) {
     auto& pufferl = pufferl_obj.cast<PuffeRL&>();
     auto& vec = pufferl.vec;
 
+    pybind11::dict py_out;
+
+    // Return empty dict if no C++ environment is loaded
+    // (e.g., when using Python environments instead of breakout)
+    if (vec == nullptr) {
+        return py_out;
+    }
+
     Dict* out = create_dict(32);
     vec_log(vec, out);
 
-    pybind11::dict py_out;
     for (int i = 0; i < out->size; i++) {
         py_out[out->items[i].key] = out->items[i].float_value;
     }
@@ -1493,12 +1500,19 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl(pybind11::dict kwargs) {
     std::cout << "value weight: " << pufferl->policy->value->weight[0][0].item<float>() << std::endl;
     */
 
+    // NOTE: Breakout environment loading disabled by default.
+    // The C++ trainer is breakout-specific. For custom Python environments,
+    // use python_pufferl.PuffeRL which handles envs in Python.
+    // To re-enable breakout, uncomment below and build breakout.so via scripts/build_vec.sh
+    /*
     auto [vec, obs, actions, rewards, terminals] = create_environments(pufferl->num_envs);
     pufferl->vec = vec;
     pufferl->env_obs = obs;
     pufferl->env_actions = actions;
     pufferl->env_rewards = rewards;
     pufferl->env_terminals = terminals;
+    */
+    pufferl->vec = nullptr;
 
     if (pufferl->cudagraphs) {
         pufferl->rollout_graph = at::cuda::CUDAGraph();
