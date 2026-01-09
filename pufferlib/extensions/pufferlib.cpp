@@ -27,6 +27,54 @@
 
 #include <iostream>
 #include <vector>
+#include <string>
+
+// Helper function to get the directory where this shared library is located
+static std::string get_module_directory() {
+    Dl_info info;
+    // Use address of this function to find our own .so location
+    if (dladdr((void*)get_module_directory, &info) && info.dli_fname) {
+        std::string path(info.dli_fname);
+        size_t last_slash = path.rfind('/');
+        if (last_slash != std::string::npos) {
+            return path.substr(0, last_slash);
+        }
+    }
+    return ".";
+}
+
+// Helper function to find breakout.so in various locations
+static std::string find_breakout_so() {
+    std::string module_dir = get_module_directory();
+
+    // List of paths to search, in priority order
+    std::vector<std::string> search_paths = {
+        module_dir + "/breakout.so",           // Same directory as pufferlib._C.so
+        module_dir + "/../ocean/breakout/binding.cpython*.so",  // Installed location
+        "./breakout.so",                        // Current working directory (backward compat)
+    };
+
+    // Try each path
+    for (const auto& path : search_paths) {
+        // Skip glob patterns for now, just try direct paths
+        if (path.find('*') == std::string::npos) {
+            void* test_handle = dlopen(path.c_str(), RTLD_NOW | RTLD_NOLOAD);
+            if (test_handle) {
+                dlclose(test_handle);
+                return path;
+            }
+            // Try opening it fresh
+            test_handle = dlopen(path.c_str(), RTLD_NOW);
+            if (test_handle) {
+                dlclose(test_handle);
+                return path;
+            }
+        }
+    }
+
+    // Return default path - the error will be handled by the caller
+    return "./breakout.so";
+}
 
 create_environments_fn create_envs;
 create_threads_fn create_threads;
@@ -106,9 +154,16 @@ void clip_grad_norm_(
 
 std::tuple<VecEnv*, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 create_environments(int64_t num_envs) {
-    void* handle = dlopen("./breakout.so", RTLD_NOW);
+    // Find breakout.so dynamically instead of hardcoding ./breakout.so
+    std::string breakout_path = find_breakout_so();
+    void* handle = dlopen(breakout_path.c_str(), RTLD_NOW);
     if (!handle) {
+        std::string module_dir = get_module_directory();
         fprintf(stderr, "dlopen error: %s\n", dlerror());
+        fprintf(stderr, "Failed to load breakout.so. Searched in:\n");
+        fprintf(stderr, "  - %s/breakout.so\n", module_dir.c_str());
+        fprintf(stderr, "  - ./breakout.so (current directory)\n");
+        fprintf(stderr, "Please build breakout.so using scripts/build_vec.sh\n");
         exit(1);
     }
     dlerror();
